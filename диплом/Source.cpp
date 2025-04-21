@@ -1,3 +1,4 @@
+// [автоматический разворот по полуокружности добавлен по клавише K]
 #include <SFML/Graphics.hpp>
 #include <cmath>
 #include <iostream>
@@ -19,7 +20,7 @@ constexpr float HITCH_LENGTH = 1.2f * METERS_TO_PIXELS;
 constexpr int WINDOW_WIDTH = 1200;
 constexpr int WINDOW_HEIGHT = 800;
 constexpr float MAX_SPEED = 3.33f * METERS_TO_PIXELS;
-constexpr float MAX_TURN_RATE = 120.f; // градусов в секунду
+constexpr float MAX_TURN_RATE = 120.f;
 
 class Tractor {
 public:
@@ -29,18 +30,25 @@ public:
     float speed = 0.f;
     bool cruiseControl = true;
     bool stopping = false;
+    bool turningRight = false;
+    float turnProgress = 0.f;
+    float radius = 0.f;
+    sf::Vector2f turnCenter;
 
     Tractor() {
         position = sf::Vector2f(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
     }
 
-    void toggleCruise() {
-        cruiseControl = !cruiseControl;
-        std::cout << "Cruise Control: " << (cruiseControl ? "ON" : "OFF") << std::endl;
-    }
+    void toggleCruise() { cruiseControl = !cruiseControl; }
+    void stop() { stopping = true; }
 
-    void stop() {
-        stopping = true;
+    void startTurnRight() {
+        if (turningRight) return;
+        turningRight = true;
+        turnProgress = 0.f;
+        radius = TRACTOR_LENGTH * 1.5f;
+        float angleRad = angle * DEG_TO_RAD;
+        turnCenter = position + sf::Vector2f(-std::sin(angleRad), std::cos(angleRad)) * radius;
     }
 
     void update(float dt) {
@@ -53,12 +61,34 @@ public:
             if (speed == 0) stopping = false;
         }
 
-        float theta = angle * DEG_TO_RAD;
-        float beta = atan(tan(steeringAngle * DEG_TO_RAD));
-        position.x += speed * cos(theta + beta) * dt;
-        position.y += speed * sin(theta + beta) * dt;
+        if (turningRight) {
+            // Принудительная установка скорости разворота
+            float targetTurnSpeed = 3.0f * METERS_TO_PIXELS;
+            if (speed < targetTurnSpeed) speed = std::min(speed + 20.f * dt, targetTurnSpeed);
+            else if (speed > targetTurnSpeed) speed = std::max(speed - 20.f * dt, targetTurnSpeed);
+            float turnSpeed = speed;
+            float angleDelta = (turnSpeed * dt) / radius * 180.f / PI;
+            turnProgress += angleDelta;
 
-        angle += (speed / wheelBase) * tan(steeringAngle * DEG_TO_RAD) * dt * 180.0f / PI;
+            if (turnProgress >= 180.f) {
+                angle += angleDelta - (turnProgress - 180.f);
+                turningRight = false;
+                angle = std::fmod(angle + 360.f, 360.f);
+            }
+            else {
+                angle += angleDelta;
+            }
+
+            float rad = (angle - 90.f) * DEG_TO_RAD;
+            position = turnCenter + sf::Vector2f(std::cos(rad), std::sin(rad)) * radius;
+        }
+        else {
+            float theta = angle * DEG_TO_RAD;
+            float beta = atan(tan(steeringAngle * DEG_TO_RAD));
+            position.x += speed * cos(theta + beta) * dt;
+            position.y += speed * sin(theta + beta) * dt;
+            angle += (speed / wheelBase) * tan(steeringAngle * DEG_TO_RAD) * dt * 180.0f / PI;
+        }
     }
 
     void draw(sf::RenderWindow& window) {
@@ -94,12 +124,8 @@ public:
     bool active = false;
     sf::Vector2f position;
     float angleDeg = 0.f;
-    float angularVelocity = 0.f;
 
-    void toggle() {
-        active = !active;
-        std::cout << "Trailer: " << (active ? "ACTIVE" : "INACTIVE") << std::endl;
-    }
+    void toggle() { active = !active; }
 
     void update(const sf::Vector2f& hitch, float dt, sf::RenderTexture& terrainLayer) {
         sf::Vector2f toHitch = hitch - position;
@@ -121,22 +147,20 @@ public:
 
         if (active) {
             float w = TRAILER_WIDTH / 2.f;
-            sf::ConvexShape line;
-            line.setPointCount(4);
-            line.setFillColor(sf::Color(250, 250, 250));
+            float backX = position.x - std::cos(angleRad) * TRAILER_LENGTH;
+            float backY = position.y - std::sin(angleRad) * TRAILER_LENGTH;
+            sf::Vector2f center(backX, backY);
 
-            sf::Vector2f back = position - sf::Vector2f(std::cos(angleRad), std::sin(angleRad)) * TRAILER_LENGTH;
-            sf::Vector2f left = back + sf::Vector2f(std::cos(angleRad + PI / 2), std::sin(angleRad + PI / 2)) * w;
-            sf::Vector2f right = back + sf::Vector2f(std::cos(angleRad - PI / 2), std::sin(angleRad - PI / 2)) * w;
-            //center.y == 400
+            sf::Vector2f left = center + sf::Vector2f(std::cos(angleRad + PI / 2), std::sin(angleRad + PI / 2)) * w;
+            sf::Vector2f right = center + sf::Vector2f(std::cos(angleRad - PI / 2), std::sin(angleRad - PI / 2)) * w;
 
-            line.setPoint(0, left + sf::Vector2f(0, 5 + 2 * (400 - left.y)));
-            line.setPoint(1, left + sf::Vector2f(-5, 2 * (400 - left.y)));
-            line.setPoint(3, right + sf::Vector2f(0, -5 + 2 * (400 - right.y)));
-            line.setPoint(2, right + sf::Vector2f(5, 2 * (400 - right.y)));
-            
-
-            terrainLayer.draw(line);
+            sf::VertexArray mark(sf::LinesStrip, 11);
+            for (int i = 0; i <= 10; ++i) {
+                float t = i / 10.f;
+                sf::Vector2f point = left + t * (right - left);
+                mark[i] = sf::Vertex(point, sf::Color(100, 100, 100));
+            }
+            terrainLayer.draw(mark);
         }
     }
 
@@ -153,6 +177,7 @@ public:
         triangle.setPoint(0, position);
         triangle.setPoint(1, left);
         triangle.setPoint(2, right);
+
         window.draw(triangle);
     }
 };
@@ -168,7 +193,6 @@ void drawGrid(sf::RenderWindow& window) {
         };
         window.draw(line, 2, sf::Lines);
     }
-
     for (float y = 0; y < WINDOW_HEIGHT; y += step) {
         sf::Vertex line[] = {
             sf::Vertex(sf::Vector2f(0, y), gridColor),
@@ -195,21 +219,18 @@ int main() {
     while (window.isOpen()) {
         sf::Event event;
         while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed)
-                window.close();
+            if (event.type == sf::Event::Closed) window.close();
             if (event.type == sf::Event::KeyPressed) {
-                if (event.key.code == sf::Keyboard::Space)
-                    tractor.toggleCruise();
-                if (event.key.code == sf::Keyboard::G)
-                    tractor.stop();
-                if (event.key.code == sf::Keyboard::T)
-                    trailer.toggle();
+                if (event.key.code == sf::Keyboard::Space) tractor.toggleCruise();
+                if (event.key.code == sf::Keyboard::G) tractor.stop();
+                if (event.key.code == sf::Keyboard::T) trailer.toggle();
+                if (event.key.code == sf::Keyboard::K) tractor.startTurnRight();
             }
         }
 
         float dt = clock.restart().asSeconds();
 
-        if (!tractor.stopping) {
+        if (!tractor.stopping && !tractor.turningRight) {
             if (sf::Keyboard::isKeyPressed(sf::Keyboard::W))
                 tractor.speed += 20.f * dt;
             else if (sf::Keyboard::isKeyPressed(sf::Keyboard::S))
@@ -221,12 +242,14 @@ int main() {
         if (tractor.speed > MAX_SPEED) tractor.speed = MAX_SPEED;
         if (tractor.speed < -MAX_SPEED) tractor.speed = -MAX_SPEED;
 
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::A))
-            tractor.steeringAngle = std::max(tractor.steeringAngle - 60.f * dt, -30.f);
-        else if (sf::Keyboard::isKeyPressed(sf::Keyboard::D))
-            tractor.steeringAngle = std::min(tractor.steeringAngle + 60.f * dt, 30.f);
-        else
-            tractor.steeringAngle *= 0.9f;
+        if (!tractor.turningRight) {
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::A))
+                tractor.steeringAngle = std::max(tractor.steeringAngle - 60.f * dt, -30.f);
+            else if (sf::Keyboard::isKeyPressed(sf::Keyboard::D))
+                tractor.steeringAngle = std::min(tractor.steeringAngle + 60.f * dt, 30.f);
+            else
+                tractor.steeringAngle *= 0.9f;
+        }
 
         tractor.update(dt);
         trailer.update(tractor.getHitchPosition(), dt, terrainLayer);

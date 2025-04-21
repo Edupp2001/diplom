@@ -147,20 +147,22 @@ public:
 
         if (active) {
             float w = TRAILER_WIDTH / 2.f;
-            float backX = position.x - std::cos(angleRad) * TRAILER_LENGTH;
-            float backY = position.y - std::sin(angleRad) * TRAILER_LENGTH;
-            sf::Vector2f center(backX, backY);
+            sf::ConvexShape line;
+            line.setPointCount(4);
+            line.setFillColor(sf::Color(250, 250, 250));
 
-            sf::Vector2f left = center + sf::Vector2f(std::cos(angleRad + PI / 2), std::sin(angleRad + PI / 2)) * w;
-            sf::Vector2f right = center + sf::Vector2f(std::cos(angleRad - PI / 2), std::sin(angleRad - PI / 2)) * w;
+            sf::Vector2f back = position - sf::Vector2f(std::cos(angleRad), std::sin(angleRad)) * TRAILER_LENGTH;
+            sf::Vector2f left = back + sf::Vector2f(std::cos(angleRad + PI / 2), std::sin(angleRad + PI / 2)) * w;
+            sf::Vector2f right = back + sf::Vector2f(std::cos(angleRad - PI / 2), std::sin(angleRad - PI / 2)) * w;
+            //center.y == 400
 
-            sf::VertexArray mark(sf::LinesStrip, 11);
-            for (int i = 0; i <= 10; ++i) {
-                float t = i / 10.f;
-                sf::Vector2f point = left + t * (right - left);
-                mark[i] = sf::Vertex(point, sf::Color(100, 100, 100));
-            }
-            terrainLayer.draw(mark);
+            line.setPoint(0, left + sf::Vector2f(0, 5 + 2 * (400 - left.y)));
+            line.setPoint(1, left + sf::Vector2f(-5, 2 * (400 - left.y)));
+            line.setPoint(3, right + sf::Vector2f(0, -5 + 2 * (400 - right.y)));
+            line.setPoint(2, right + sf::Vector2f(5, 2 * (400 - right.y)));
+
+
+            terrainLayer.draw(line);
         }
     }
 

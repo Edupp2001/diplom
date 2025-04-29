@@ -21,102 +21,12 @@ constexpr int WINDOW_WIDTH = 1200;
 constexpr int WINDOW_HEIGHT = 800;
 constexpr float MAX_SPEED = 3.33f * METERS_TO_PIXELS;
 constexpr float MAX_TURN_RATE = 120.f;
-
-class Tractor {
-public:
-    sf::Vector2f position;
-    float angle = 0.f;
-    float steeringAngle = 0.f;
-    float speed = 0.f;
-    bool cruiseControl = true;
-    bool stopping = false;
-    bool turningRight = false;
-    float turnProgress = 0.f;
-    float radius = 0.f;
-    sf::Vector2f turnCenter;
-
-    Tractor() {
-        position = sf::Vector2f(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
-    }
-
-    void toggleCruise() { cruiseControl = !cruiseControl; }
-    void stop() { stopping = true; }
-
-    void startTurnRight() {
-        if (turningRight) return;
-        turningRight = true;
-        turnProgress = 0.f;
-        radius = TRACTOR_LENGTH * 1.5f;
-        float angleRad = angle * DEG_TO_RAD;
-        turnCenter = position + sf::Vector2f(-std::sin(angleRad), std::cos(angleRad)) * radius;
-    }
-
-    void update(float dt) {
-        float wheelBase = 2.45f * METERS_TO_PIXELS;
-
-        if (stopping) {
-            float brakeDecel = 15.f * dt;
-            if (speed > 0) speed = std::max(0.f, speed - brakeDecel);
-            else if (speed < 0) speed = std::min(0.f, speed + brakeDecel);
-            if (speed == 0) stopping = false;
-        }
-
-        if (turningRight) {
-            // Принудительная установка скорости разворота
-            float targetTurnSpeed = 3.0f * METERS_TO_PIXELS;
-            if (speed < targetTurnSpeed) speed = std::min(speed + 20.f * dt, targetTurnSpeed);
-            else if (speed > targetTurnSpeed) speed = std::max(speed - 20.f * dt, targetTurnSpeed);
-            float turnSpeed = speed;
-            float angleDelta = (turnSpeed * dt) / radius * 180.f / PI;
-            turnProgress += angleDelta;
-
-            if (turnProgress >= 180.f) {
-                angle += angleDelta - (turnProgress - 180.f);
-                turningRight = false;
-                angle = std::fmod(angle + 360.f, 360.f);
-            }
-            else {
-                angle += angleDelta;
-            }
-
-            float rad = (angle - 90.f) * DEG_TO_RAD;
-            position = turnCenter + sf::Vector2f(std::cos(rad), std::sin(rad)) * radius;
-        }
-        else {
-            float theta = angle * DEG_TO_RAD;
-            float beta = atan(tan(steeringAngle * DEG_TO_RAD));
-            position.x += speed * cos(theta + beta) * dt;
-            position.y += speed * sin(theta + beta) * dt;
-            angle += (speed / wheelBase) * tan(steeringAngle * DEG_TO_RAD) * dt * 180.0f / PI;
-        }
-    }
-
-    void draw(sf::RenderWindow& window) {
-        sf::RectangleShape body(sf::Vector2f(TRACTOR_LENGTH, TRACTOR_WIDTH));
-        body.setOrigin(TRACTOR_LENGTH / 2, TRACTOR_WIDTH / 2);
-        body.setPosition(position);
-        body.setRotation(angle);
-        body.setFillColor(cruiseControl ? sf::Color::Blue : sf::Color::Red);
-
-        sf::RectangleShape stripe(sf::Vector2f(TRACTOR_WIDTH * 0.6f, TRACTOR_WIDTH * 0.1f));
-        stripe.setFillColor(sf::Color::Yellow);
-        stripe.setOrigin(stripe.getSize().x / 2, stripe.getSize().y / 2);
-        stripe.setPosition(position);
-        stripe.setRotation(angle);
-
-        float offset = TRACTOR_LENGTH / 2 - stripe.getSize().y;
-        float dx = std::cos(angle * DEG_TO_RAD) * offset;
-        float dy = std::sin(angle * DEG_TO_RAD) * offset;
-        stripe.move(dx, dy);
-
-        window.draw(body);
-        window.draw(stripe);
-    }
-
-    sf::Vector2f getHitchPosition() const {
-        float theta = angle * DEG_TO_RAD;
-        return position - sf::Vector2f(std::cos(theta), std::sin(theta)) * (TRACTOR_LENGTH / 2);
-    }
+float overlay = 0.f; // в метрах
+struct canonline {
+    float x1, y1;
+    float dx, dy;//dx = x2 - x1, dy = y2 - y1
+    // (x - x1) / dx = (y - y1) / dy
+    float startangle;
 };
 
 class Trailer {
@@ -149,7 +59,7 @@ public:
             float w = TRAILER_WIDTH / 2.f;
             sf::ConvexShape line;
             line.setPointCount(4);
-            line.setFillColor(sf::Color(250, 250, 250));
+            line.setFillColor(sf::Color(128, 128, 0));
 
             sf::Vector2f back = position - sf::Vector2f(std::cos(angleRad), std::sin(angleRad)) * TRAILER_LENGTH;
             sf::Vector2f left = back + sf::Vector2f(std::cos(angleRad + PI / 2), std::sin(angleRad + PI / 2)) * w;
@@ -181,6 +91,106 @@ public:
         triangle.setPoint(2, right);
 
         window.draw(triangle);
+    }
+};
+
+class Tractor {
+public:
+    sf::Vector2f position;
+    float angle = 0.f;//getdata from compass
+    float steeringAngle = 0.f;
+    float speed = 0.f;
+    bool cruiseControl = true;
+    bool stopping = false;
+    float targetangle;
+    std::string turningAuto = "";
+    int turnPhase = 0; // 0 — не поворачиваем, 1 — влево, 2 — вправо
+    float traveled = 0.f;
+    float targetTravel = 0.f;
+    float initialDirection = 0.f;
+
+    void toggleCruise() { cruiseControl = !cruiseControl; }
+    void stop() { stopping = true; }
+    Tractor() {
+        position = sf::Vector2f(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+    }
+    void startTurn(std::string side) {
+        if (turningAuto != "") return;
+        targetangle = angle * DEG_TO_RAD;
+        turningAuto = side;
+        turnPhase = 1;
+        traveled = 0.f;
+        targetTravel = 5.4f * METERS_TO_PIXELS; // проехать 6 метра прямо влево
+        initialDirection = angle;
+    }
+
+    void update(float dt) {
+        float wheelBase = 2.45f * METERS_TO_PIXELS;
+        if (stopping) {
+            float brakeDecel = 15.f * dt;
+            if (speed > 0) speed = std::max(0.f, speed - brakeDecel);
+            else if (speed < 0) speed = std::min(0.f, speed + brakeDecel);
+            if (speed == 0) stopping = false;
+        }
+
+        if (turningAuto != "") {
+            float targetSpeed = 3.0f * METERS_TO_PIXELS;
+            if (speed < targetSpeed) speed = std::min(speed + 20.f * dt, targetSpeed);
+            else if (speed > targetSpeed) speed = std::max(speed - 20.f * dt, targetSpeed);
+
+            if (turnPhase == 1) {
+                steeringAngle = 30.f * (turningAuto == "right" ? -1 : 1);
+                float dx = speed * dt * std::cos(angle * DEG_TO_RAD);
+                float dy = speed * dt * std::sin(angle * DEG_TO_RAD);
+                traveled += std::sqrt(dx * dx + dy * dy);
+                if (traveled >= targetTravel) {
+                    turnPhase = 2;
+                }
+            }
+            else if (turnPhase == 2) {
+                steeringAngle = 30.f * (turningAuto == "left" ? -1 : 1);
+                
+                float a = angle * DEG_TO_RAD;
+                
+                if ((abs(cos(targetangle) + cos(a)) < 0.00001)) { //       
+                        turningAuto = "";
+                        steeringAngle = 0.f;
+                        speed = 0;//fix
+                }    
+            }//TODO turnPhase 3, -> exact angle
+        }
+        float theta = angle * DEG_TO_RAD;
+        float beta = atan(tan(steeringAngle * DEG_TO_RAD));
+        position.x += speed * cos(theta + beta) * dt;
+        position.y += speed * sin(theta + beta) * dt;
+        angle += (speed / wheelBase) * tan(steeringAngle * DEG_TO_RAD) * dt * 180.0f / PI;
+    }
+
+    void draw(sf::RenderWindow& window) {
+        sf::RectangleShape body(sf::Vector2f(TRACTOR_LENGTH, TRACTOR_WIDTH));
+        body.setOrigin(TRACTOR_LENGTH / 2, TRACTOR_WIDTH / 2);
+        body.setPosition(position);
+        body.setRotation(angle);
+        body.setFillColor(cruiseControl ? sf::Color::Blue : sf::Color::Red);
+
+        sf::RectangleShape stripe(sf::Vector2f(TRACTOR_WIDTH * 0.6f, TRACTOR_WIDTH * 0.1f));
+        stripe.setFillColor(sf::Color::Yellow);
+        stripe.setOrigin(stripe.getSize().x / 2, stripe.getSize().y / 2);
+        stripe.setPosition(position);
+        stripe.setRotation(angle);
+
+        float offset = TRACTOR_LENGTH / 2 - stripe.getSize().y;
+        float dx = std::cos(angle * DEG_TO_RAD) * offset;
+        float dy = std::sin(angle * DEG_TO_RAD) * offset;
+        stripe.move(dx, dy);
+
+        window.draw(body);
+        window.draw(stripe);
+    }
+
+    sf::Vector2f getHitchPosition() const {
+        float theta = angle * DEG_TO_RAD;
+        return position - sf::Vector2f(std::cos(theta), std::sin(theta)) * (TRACTOR_LENGTH / 2);
     }
 };
 
@@ -226,13 +236,19 @@ int main() {
                 if (event.key.code == sf::Keyboard::Space) tractor.toggleCruise();
                 if (event.key.code == sf::Keyboard::G) tractor.stop();
                 if (event.key.code == sf::Keyboard::T) trailer.toggle();
-                if (event.key.code == sf::Keyboard::K) tractor.startTurnRight();
+                if (event.key.code == sf::Keyboard::K) {
+                    tractor.startTurn("right");
+                }
+                if (event.key.code == sf::Keyboard::L) {
+                    tractor.startTurn("left");
+                }
+
             }
         }
 
         float dt = clock.restart().asSeconds();
 
-        if (!tractor.stopping && !tractor.turningRight) {
+        if (!tractor.stopping && tractor.turningAuto == "") {
             if (sf::Keyboard::isKeyPressed(sf::Keyboard::W))
                 tractor.speed += 20.f * dt;
             else if (sf::Keyboard::isKeyPressed(sf::Keyboard::S))
@@ -244,7 +260,7 @@ int main() {
         if (tractor.speed > MAX_SPEED) tractor.speed = MAX_SPEED;
         if (tractor.speed < -MAX_SPEED) tractor.speed = -MAX_SPEED;
 
-        if (!tractor.turningRight) {
+        if (tractor.turningAuto == "") {
             if (sf::Keyboard::isKeyPressed(sf::Keyboard::A))
                 tractor.steeringAngle = std::max(tractor.steeringAngle - 60.f * dt, -30.f);
             else if (sf::Keyboard::isKeyPressed(sf::Keyboard::D))
@@ -252,7 +268,9 @@ int main() {
             else
                 tractor.steeringAngle *= 0.9f;
         }
-
+        
+        
+        
         tractor.update(dt);
         trailer.update(tractor.getHitchPosition(), dt, terrainLayer);
 

@@ -5,7 +5,7 @@
 
 constexpr float PI = 3.14159265f;
 constexpr float DEG_TO_RAD = PI / 180.0f;
-constexpr float METERS_TO_PIXELS = 25.0f;
+constexpr float METERS_TO_PIXELS = 15.0f;
 
 constexpr float TRACTOR_LENGTH_M = 3.9f;
 constexpr float TRACTOR_WIDTH_M = 1.97f;
@@ -67,7 +67,7 @@ public:
             //center.y == 400
 
             line.setPoint(0, left + sf::Vector2f(0, 5 + 2 * (400 - left.y)));
-            line.setPoint(1, left + sf::Vector2f(-5, 2 * (400 - left.y)));
+            line.setPoint(1, left + sf::Vector2f(-5, 2 * (400 - left.y)));//fix
             line.setPoint(3, right + sf::Vector2f(0, -5 + 2 * (400 - right.y)));
             line.setPoint(2, right + sf::Vector2f(5, 2 * (400 - right.y)));
 
@@ -96,6 +96,7 @@ public:
 
 class Tractor {
 public:
+    Trailer trailer;
     sf::Vector2f position;
     float angle = 0.f;//getdata from compass
     float steeringAngle = 0.f;
@@ -103,12 +104,17 @@ public:
     bool cruiseControl = true;
     bool stopping = false;
     float targetangle;
+    //разворот
     std::string turningAuto = "";
-    int turnPhase = 0; // 0 — не поворачиваем, 1 — влево, 2 — вправо
+    int turnPhase = 0; // 0 — не поворачиваем, 1 — выезд на дугу, 2 — выравнивание, TODO: 3 - стабилизирование(убираем погрешность)
     float traveled = 0.f;
     float targetTravel = 0.f;
-    float initialDirection = 0.f;
-
+    //forward
+    bool movingForward = false;
+    float forwardTarget = 0.f;
+    float forwardTraveled = 0.f;
+    //fill
+    //todo
     void toggleCruise() { cruiseControl = !cruiseControl; }
     void stop() { stopping = true; }
     Tractor() {
@@ -121,7 +127,14 @@ public:
         turnPhase = 1;
         traveled = 0.f;
         targetTravel = 5.4f * METERS_TO_PIXELS; // проехать 6 метра прямо влево
-        initialDirection = angle;
+    }
+    void forward(float meters = 25.0f) {
+        if (!movingForward) {
+            forwardTarget = meters * METERS_TO_PIXELS; // 25 метров
+            forwardTraveled = 0.f;
+            movingForward = true;
+            cruiseControl = false; // отключим круиз, если активен
+        }
     }
 
     void update(float dt) {
@@ -133,7 +146,7 @@ public:
             if (speed == 0) stopping = false;
         }
 
-        if (turningAuto != "") {
+        if (turningAuto != "") {//my method(bad)
             float targetSpeed = 3.0f * METERS_TO_PIXELS;
             if (speed < targetSpeed) speed = std::min(speed + 20.f * dt, targetSpeed);
             else if (speed > targetSpeed) speed = std::max(speed - 20.f * dt, targetSpeed);
@@ -156,6 +169,7 @@ public:
                         turningAuto = "";
                         steeringAngle = 0.f;
                         speed = 0;//fix
+                        this->forward(12.8);
                 }    
             }//TODO turnPhase 3, -> exact angle
         }
@@ -163,6 +177,24 @@ public:
         float beta = atan(tan(steeringAngle * DEG_TO_RAD));
         position.x += speed * cos(theta + beta) * dt;
         position.y += speed * sin(theta + beta) * dt;
+        if (movingForward) {
+            float dx = speed * dt * std::cos(angle * DEG_TO_RAD);
+            float dy = speed * dt * std::sin(angle * DEG_TO_RAD);
+            float distance = std::sqrt(dx * dx + dy * dy);
+            forwardTraveled += distance;
+
+            float targetSpeed = 3.0f * METERS_TO_PIXELS;
+            if (speed < targetSpeed)
+                speed = std::min(speed + 20.f * dt, targetSpeed);
+            else if (speed > targetSpeed)
+                speed = std::max(speed - 20.f * dt, targetSpeed);
+
+            if (forwardTraveled >= forwardTarget) {
+                speed = 0.f;
+                movingForward = false;
+                
+            }
+        }
         angle += (speed / wheelBase) * tan(steeringAngle * DEG_TO_RAD) * dt * 180.0f / PI;
     }
 
@@ -223,9 +255,9 @@ int main() {
     terrainLayer.clear(sf::Color::Transparent);
 
     Tractor tractor;
-    Trailer trailer;
-    trailer.position = tractor.getHitchPosition() - sf::Vector2f(std::cos(tractor.angle * DEG_TO_RAD), std::sin(tractor.angle * DEG_TO_RAD)) * HITCH_LENGTH;
-    trailer.angleDeg = tractor.angle;
+    tractor.trailer;
+    tractor.trailer.position = tractor.getHitchPosition() - sf::Vector2f(std::cos(tractor.angle * DEG_TO_RAD), std::sin(tractor.angle * DEG_TO_RAD)) * HITCH_LENGTH;
+    tractor.trailer.angleDeg = tractor.angle;
 
     sf::Clock clock;
     while (window.isOpen()) {
@@ -235,13 +267,17 @@ int main() {
             if (event.type == sf::Event::KeyPressed) {
                 if (event.key.code == sf::Keyboard::Space) tractor.toggleCruise();
                 if (event.key.code == sf::Keyboard::G) tractor.stop();
-                if (event.key.code == sf::Keyboard::T) trailer.toggle();
+                if (event.key.code == sf::Keyboard::T) tractor.trailer.toggle();
                 if (event.key.code == sf::Keyboard::K) {
                     tractor.startTurn("right");
                 }
-                if (event.key.code == sf::Keyboard::L) {
+                if (event.key.code == sf::Keyboard::J) {
                     tractor.startTurn("left");
                 }
+                if (event.key.code == sf::Keyboard::F) {
+                    tractor.forward();
+                }
+                
 
             }
         }
@@ -257,7 +293,7 @@ int main() {
                 tractor.speed *= 0.98f;
         }
 
-        if (tractor.speed > MAX_SPEED) tractor.speed = MAX_SPEED;
+        if (tractor.speed > MAX_SPEED) tractor.speed = MAX_SPEED;//fix
         if (tractor.speed < -MAX_SPEED) tractor.speed = -MAX_SPEED;
 
         if (tractor.turningAuto == "") {
@@ -272,7 +308,7 @@ int main() {
         
         
         tractor.update(dt);
-        trailer.update(tractor.getHitchPosition(), dt, terrainLayer);
+        tractor.trailer.update(tractor.getHitchPosition(), dt, terrainLayer);
 
         window.clear(sf::Color::White);
         drawGrid(window);
@@ -281,7 +317,7 @@ int main() {
         window.draw(terrainSprite);
 
         tractor.draw(window);
-        trailer.draw(window);
+        tractor.trailer.draw(window);
         window.display();
     }
     return 0;

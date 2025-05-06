@@ -293,6 +293,8 @@ int main() {
     tractor.trailer.angleDeg = tractor.angle;
 
     sf::Clock clock;
+    std::vector<sf::Vector2f> drawnPoints;
+    bool isDrawing = false;
     while (window.isOpen()) {
         sf::Event event;
         while (window.pollEvent(event)) {
@@ -313,11 +315,24 @@ int main() {
                 if (event.key.code == sf::Keyboard::L) {
                     tractor.showPredictedPath = !tractor.showPredictedPath;
                 }
-
-
+            }
+            if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
+                drawnPoints.clear();
+                std::cout << "yes";
+                isDrawing = true;
+            }
+            if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left) {
+                isDrawing = false;
+                std::cout << "no";
             }
         }
-
+        if (isDrawing) {
+            sf::Vector2f mousePos = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+            if (drawnPoints.empty() ||
+                std::hypot(mousePos.x - drawnPoints.back().x, mousePos.y - drawnPoints.back().y) > 5.f) {
+                drawnPoints.push_back(mousePos);
+            }
+        }
         float dt = clock.restart().asSeconds();
 
         if (!tractor.stopping && tractor.turningAuto == "") {
@@ -354,6 +369,16 @@ int main() {
 
         tractor.draw(window);
         tractor.trailer.draw(window);
+
+        if (drawnPoints.size() > 1) {
+            sf::VertexArray line(sf::LineStrip, drawnPoints.size());
+            for (size_t i = 0; i < drawnPoints.size(); ++i) {
+                line[i].position = drawnPoints[i];
+                line[i].color = sf::Color::Black;
+            }
+            window.draw(line);
+        }
+
         window.display();
     }
     return 0;

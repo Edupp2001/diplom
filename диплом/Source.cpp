@@ -96,6 +96,8 @@ public:
 
 class Tractor {
 public:
+    std::vector<sf::Vector2f> predictedPath;
+    bool showPredictedPath = false;
     Trailer trailer;
     sf::Vector2f position;
     float angle = 0.f;//getdata from compass
@@ -165,13 +167,15 @@ public:
                 
                 float a = angle * DEG_TO_RAD;
                 
-                if ((abs(cos(targetangle) + cos(a)) < 0.00001)) { //       
+                if ((abs(cos(targetangle) + cos(a)) < 0.001)) { //       
                         turningAuto = "";
                         steeringAngle = 0.f;
                         speed = 0;//fix
                         this->forward(12.8);
                 }    
             }//TODO turnPhase 3, -> exact angle
+            
+
         }
         float theta = angle * DEG_TO_RAD;
         float beta = atan(tan(steeringAngle * DEG_TO_RAD));
@@ -196,6 +200,27 @@ public:
             }
         }
         angle += (speed / wheelBase) * tan(steeringAngle * DEG_TO_RAD) * dt * 180.0f / PI;
+        if (showPredictedPath) {
+            predictPath();
+        }
+    }
+    void predictPath(float duration = 5.f, float timestep = 0.1f) {
+        predictedPath.clear();
+        float tempAngle = angle;
+        sf::Vector2f tempPos = position;
+        float tempSpeed = speed;
+        float wheelBase = 2.45f * METERS_TO_PIXELS;
+
+        for (float t = 0.f; t < duration; t += timestep) {
+            float theta = tempAngle * DEG_TO_RAD;
+            float beta = atan(tan(steeringAngle * DEG_TO_RAD));
+            tempPos.x += tempSpeed * cos(theta + beta) * timestep;
+            tempPos.y += tempSpeed * sin(theta + beta) * timestep;
+            tempAngle += (tempSpeed / wheelBase) * tan(steeringAngle * DEG_TO_RAD) * timestep * 180.0f / PI;
+            predictedPath.push_back(tempPos);
+        }
+
+        showPredictedPath = true;
     }
 
     void draw(sf::RenderWindow& window) {
@@ -218,6 +243,14 @@ public:
 
         window.draw(body);
         window.draw(stripe);
+        if (showPredictedPath && predictedPath.size() > 1) {
+            sf::VertexArray lines(sf::LineStrip, predictedPath.size());
+            for (size_t i = 0; i < predictedPath.size(); ++i) {
+                lines[i].position = predictedPath[i];
+                lines[i].color = sf::Color::Magenta;
+            }
+            window.draw(lines);
+        }
     }
 
     sf::Vector2f getHitchPosition() const {
@@ -277,7 +310,10 @@ int main() {
                 if (event.key.code == sf::Keyboard::F) {
                     tractor.forward();
                 }
-                
+                if (event.key.code == sf::Keyboard::L) {
+                    tractor.showPredictedPath = !tractor.showPredictedPath;
+                }
+
 
             }
         }

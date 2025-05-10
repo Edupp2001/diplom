@@ -104,27 +104,50 @@ void drawCircle(sf::RenderWindow& window, float x, float y, float r) {
     window.draw(circle);
     //system("pause");
 }
+bool iscollinear(float x2, float y2, float x3, float y3) {
+    return (x2 * y3 + x3 * y2) == 0;
+}
 int checkdots(float x, float y, std::vector<sf::Vector2f>& fd, float theta) {
-    if (fd.size() < 2) {
-        return 1;
-    }
+    
+    sf::Vector2f IRC;
+    float R;
     float newx1 = 0;
     float newy1 = 0;
     float xsh = fd[0].x - x;
     float ysh = fd[0].y - y;
     float newy2 = xsh * cos(theta) + ysh * sin(theta);
     float newx2 = -xsh * sin(theta) + ysh * cos(theta);
-    xsh = fd[1].x - x;
-    ysh = fd[1].y - y;
-    float newy3 = xsh * cos(theta) + ysh * sin(theta);
-    float newx3 = -xsh * sin(theta) + ysh * cos(theta);
-    //чтобы точки считались "хорошими", нужно чтобы вторая точка относительно первой была в той же четверти, что и вторая относительно первой
-    if (((newy3 > newy2) && (newy2 > newy1)) && (((newx1 < newx2) && (newx2 < newx3)) || ((newx1 > newx2) && (newx2 > newx3)))) //BAD CONDITION FIIXX
-    {
-        return 0;///FIIX
-
+    if (fd.size() > 1) {
+        xsh = fd[1].x - x;
+        ysh = fd[1].y - y;
+        float newy3 = xsh * cos(theta) + ysh * sin(theta);
+        float newx3 = -xsh * sin(theta) + ysh * cos(theta);
+        if (iscollinear(newx2, newy2, newx3, newy3)) {
+            return 0;
+        }
+        else {
+            IRC.x = ((newx2 * newx2 + newy2 * newy2) * newy3 - (newx3 * newx3 + newy3 * newy3) * newy2) / (2 * (newx2 * newy3 - newx3 * newy2));
+            IRC.y = ((newx2 * newx2 + newy2 * newy2) * newx3 - (newx3 * newx3 + newy3 * newy3) * newx2) / (2 * (newy2 * newx3 - newy3 * newx2));
+            R = sqrt(IRC.x * IRC.x + IRC.y + IRC.y);
+            if (IRC.x > 0 && IRC.x - R >= 0) {
+                return atanf(TRACTOR_LENGTH / R);//check +-
+            }
+            else if (IRC.x < 0 && IRC.x + R <= 0) {
+                return -atanf(TRACTOR_LENGTH / R);//check +-
+            }
+        }
     }
-    return 1;
+    if (newx2 == 0)
+        return 0;
+    IRC.x = (newx2 * newx2 + newy2 + newy2) / (2 * newx2);
+    IRC.y = 0;
+    R = abs(IRC.x);
+    if (IRC.x > 0) {
+        return atanf(TRACTOR_LENGTH / R);
+    }
+    else if (IRC.x < 0) {
+        return -atanf(TRACTOR_LENGTH / R);
+    }
 }
 class Tractor {
 public:
@@ -313,78 +336,11 @@ public:
         float bestangle;
         float bestlen = 1000000;
         const float da = 30 * DEG_TO_RAD;
-        float left = std::max(steeringAngle - da, -30 * DEG_TO_RAD);
-        float right = std::min(steeringAngle + da, 30 * DEG_TO_RAD);
-
-        std::vector <sf::Vector2f> IRC(3);
-        std::vector <float> R(3), len(3);
-        std::cout << "start" << std::endl;
-        while (abs(right - left) > 0.0001 && abs(bestlen) > 0.01) {
-            R[0] = R[1] = R[2] = 0;
-            //tan(x) < 0.1 => (x < 5 degree)
-            if (abs(tan(left)) >= 0.1)
-                R[0] = TRACTOR_LENGTH / tan(left);
-            if (abs(tan((left + right) / 2)) >= 0.1)
-                R[1] = TRACTOR_LENGTH / tan((left + right) / 2);
-            if (abs(tan(right)) >= 0.1)
-                R[2] = TRACTOR_LENGTH / tan(right);
-            
-            std::cout << "{" << std::endl;
-            for (int i = 0; i < 3; ++i) {
-                if (R[i] != 0) {
-                    IRC[i].x = position.x + R[i] * sin(angle * DEG_TO_RAD);
-                    IRC[i].y = position.y - R[i] * cos(angle * DEG_TO_RAD);
-                    //int dotsaregood = checkdots(position.x, position.y, fd, angle * DEG_TO_RAD);//0 if good, 1 if bad
-                    len[i] = 0;
-                    std::cout << IRC[i].x << " " << IRC[i].y << " " << R[i] << std::endl;
-                    for (int j = 0; j < fd.size() - 1/*если точки плохие нужно искать минимум с одной*/; ++j) {
-                        len[i] += sqrt((IRC[i].x - fd[j].x) * (IRC[i].x - fd[j].x) + (IRC[i].y - fd[j].y) * (IRC[i].y - fd[j].y)) - abs(R[i]);
-                        std::cout << sqrt((IRC[i].x - fd[j].x) * (IRC[i].x - fd[j].x) + (IRC[i].y - fd[j].y) * (IRC[i].y - fd[j].y)) - abs(R[i]) << " " << fd[j].x << " " << fd[j].y << std::endl;
-                    }
-                    
-                }
-                else {
-                    //line
-                    len[i] = 0;
-
-                    sf::Vector2f nextpos;
-                    nextpos.x = position.x + cos(angle);
-                    nextpos.y = position.y + sin(angle);
-                    float A = position.x - nextpos.x;
-                    float B = nextpos.y - position.y;
-                    float C = nextpos.x * position.y - nextpos.y * position.x;
-                    for (int j = 0; j < fd.size(); ++j) {
-                        len[i] += (abs(A * fd[j].x + B * fd[j].y + C) / sqrt(A * A + B * B));
-                        
-                    }
-                }
-                if (abs(bestlen) > abs(len[i])) {
-                    bestlen = len[i];
-                    if (i == 0) {
-                        bestangle = left;
-                    }
-                    else if (i == 1) {
-                        bestangle = (left + right) / 2;
-                    }
-                    else {
-                        bestangle = right;
-                    }
-                }
-            }
-            std::cout << "}" << std::endl;
-            if (bestlen < 0) {//fix
-                left = (left + right) / 2;
-            }
-            else {
-                right = (left + right) / 2;
-            }
-            
-            
-            std::cout << bestlen << " " << bestangle << std::endl;
-        }
         
-        std::cout << "end" << std::endl;
-        //std::cout << c << std::endl;
+        
+        bestangle = checkdots(position.x, position.y, fd, angle * DEG_TO_RAD);
+        std::cout << bestangle << std::endl;
+
         return std::make_pair(bestangle, bestspeed);
     }
     void replanControl(const std::vector<sf::Vector2f>& path, sf::RenderWindow& window) {
@@ -407,7 +363,7 @@ public:
         //while (deltaAngle < -180.f) deltaAngle += 360.f;
         
         // Настройка руля
-        steeringAngle = bestU.first;
+        steeringAngle = bestU.first * 180 / PI;
 
         // Настройка скорости: быстрее если далеко, медленнее если близко
         float distance = std::sqrt(toTarget.x * toTarget.x + toTarget.y * toTarget.y);
@@ -511,7 +467,8 @@ int main() {
     std::vector<sf::Vector2f> drawnPoints;
     bool isDrawing = false;
     while (window.isOpen()) {
-        //std::cout << tractor.steeringAngle << std::endl;
+        
+        std::cout << tractor.steeringAngle << std::endl;
         sf::Event event;
         while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed) window.close();
